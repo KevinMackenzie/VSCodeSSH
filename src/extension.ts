@@ -10,6 +10,7 @@ class SSHSettings
     invalidated: boolean = true;
     username: string = "";
     password: string = "";
+    privateKey: string = "";
     host: string = "";
     remoteRoot: string = ""; // default: user folder
     activeFiles: string[] = [];
@@ -65,6 +66,7 @@ function callSSHMethod(ssh: any, settings: SSHSettings,
     ssh.connect({
         host: settings.host,
         username: settings.username,
+        privateKey: settings.privateKey,
         password: settings.password
     }).then(() => {
         // Download the "active files"
