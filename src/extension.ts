@@ -77,6 +77,26 @@ function callSSHMethod(ssh: any, settings: SSHSettings,
     });
 }
 
+function iterateSSHDirContents(sshInstance: any, remotePath: string, callback: (entry: string) => void): void
+{
+    sshInstance.exec("find", [remotePath, '-type', 'f']).then(
+        (results: string) => {
+            results.split("\n").forEach((value, index, array) => {
+                callback(value.substr(remotePath.length));
+            });
+        },
+        (err: any) => {
+            console.error(err);
+        }
+    );
+}
+function pullSSHFile(sshInstance: any, localFile: string, remoteFile: string): void
+{
+    sshInstance.getFile(
+        localFile, remoteFile).then(
+            () => console.log('Downloaded file: ' + remoteFile),
+            (err: any) => console.error(err));
+}
 function pullSSHFiles(sshInstance: any, settings: SSHSettings, file: number | string): void
 {
     if(vscode.workspace.workspaceFolders !== undefined)
@@ -89,36 +109,51 @@ function pullSSHFiles(sshInstance: any, settings: SSHSettings, file: number | st
                 return;
             }
             
-            var localFile = vscode.workspace.workspaceFolders[0].uri.fsPath + '/' + settings.activeFiles[file];
+            var workspaceRoot = vscode.workspace.workspaceFolders[0].uri.fsPath;
+
+            var localFile = workspaceRoot + '/' + settings.activeFiles[file];
             var remoteFile = settings.remoteRoot + '/' + settings.activeFiles[file];
 
             console.log('Downloading: "' + settings.host + '":"' + remoteFile + '" to "' + localFile + '"');
 
+
+            var onComplete = () =>
+            {
+                console.log('Downloaded file: ' + file);
+                pullSSHFiles(sshInstance, settings, file + 1);
+            };
+
+            var onError = (err: any) => 
+            {
+                console.log('Error downloading file: ' + remoteFile);
+                console.error(err);
+                pullSSHFiles(sshInstance, settings, file + 1);
+            };
+
             // we got an index, so start downloading there
-            sshInstance.getFile(
-                localFile,
-                remoteFile
-            ).then(
-                () => 
-                {
-                    console.log('Downloaded file: ' + file);
-                    pullSSHFiles(sshInstance, settings, file + 1);
-                },
-                (err: any) => 
-                {
-                    console.log('Error downloading file: ' + remoteFile);
-                    console.error(err);
-                    pullSSHFiles(sshInstance, settings, file + 1);
+            if(localFile.endsWith("/"))
+            {
+                // directory, so get its contents
+                iterateSSHDirContents(sshInstance, remoteFile, (entry) =>{
+                    console.log('Downloading file ' + entry);
+                    pullSSHFile(sshInstance, localFile + '/' + entry, remoteFile + '/' + entry);
                 });
+            }
+            else
+            {
+                // file
+                sshInstance.getFile(
+                    localFile,
+                    remoteFile
+                ).then(onComplete, onError);
+            }
         }
         else if(typeof file === "string")
         {
             // we got a name, so ONLY download that
-            sshInstance.getFile(
-                vscode.workspace.workspaceFolders[0].uri.fsPath + '/' + file,
-                settings.remoteRoot + file).then(
-                    () => console.log('Downloaded file: ' + file),
-                    (err: any) => console.error(err));
+            pullSSHFile(sshInstance, 
+                vscode.workspace.workspaceFolders[0].uri.fsPath + '/' + file, 
+                settings.remoteRoot + file);
         }
     }
 }
@@ -141,22 +176,36 @@ function pushSSHFiles(sshInstance: any, settings: SSHSettings, file: number | st
 
             console.log('Uploading: "' + localFile + '" to "' + settings.host + '":"' + remoteFile + '"');
 
+            var onComplete = () =>
+            {
+                console.log('Uploaded file: ' + file);
+                pushSSHFiles(sshInstance, settings, file + 1);
+            };
+
+            var onError = (err: any) => 
+            {
+                console.log('Error uploading file: ' + remoteFile);
+                console.error(err);
+                pushSSHFiles(sshInstance, settings, file + 1);
+            };
+
             // we got an index, so start downloading there
-            sshInstance.putFile(
-                localFile, 
-                remoteFile
-            ).then(
-                () => 
-                {
-                    console.log('Uploaded file: ' + file);
-                    pushSSHFiles(sshInstance, settings, file + 1);
-                },
-                (err: any) => 
-                {
-                    console.log('Error uploading file: ' + remoteFile);
-                    console.error(err);
-                    pushSSHFiles(sshInstance, settings, file + 1);
-                });
+            if(localFile.endsWith("/"))
+            {
+                // directory
+                sshInstance.putDirectory(
+                    localFile, 
+                    remoteFile
+                ).then(onComplete,onError);
+            }
+            else
+            {
+                // file
+                sshInstance.putFile(
+                    localFile, 
+                    remoteFile
+                ).then(onComplete, onError);
+            }
         }
         else if(typeof file === "string")
         {
