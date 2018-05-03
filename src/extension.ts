@@ -7,18 +7,18 @@ const node_ssh = require('node-ssh');
 
 class SSHSettings
 {
-    username: string = "";
-    password: string = "";
-    privateKey: string = "";
-    host: string = "";
-    remoteRoot: string = ""; // default: user folder
-    localRoot: string = ""; // default: user folder??
+    username:    string = "";
+    password:    string = "";
+    privateKey:  string = "";
+    host:        string = "";
+    remoteRoot:  string = ""; // default: user folder
+    localRoot:   string = ""; // always workspace folder
     activeFiles: string[] = [];
 }
 function sshSettingsReplacer(key: string, value: string)
 {
     // Don't save this property, it is setup on load
-    if (key ===" localRoot") 
+    if (key === "localRoot") 
     { 
         return undefined; 
     }
@@ -28,9 +28,14 @@ function sshSettingsReplacer(key: string, value: string)
     }
 }
 
-// global ssh instance
+/** Gloabl {@link node_ssh} instance */
 var _ssh = new node_ssh();
 
+/** 
+ * Attempts to load the ssh connection settings from ".sshsettings" 
+ *  file in the workspace root.  Resolves undefined if no workspace
+ *  is open or a blank ".sshsettings" file was generated.
+ */
 function loadSettingsFile(): Promise<SSHSettings | undefined>
 {
     return new Promise((resolve, reject) => {
@@ -83,6 +88,12 @@ function loadSettingsFile(): Promise<SSHSettings | undefined>
     });
 }
 
+/**
+ * A helper method to log an error and notify the user of an SSH
+ *  connection failure
+ * @param reason The error object
+ * @param host The host the plugin attempted to connect to
+ */
 function sshConnectionFail(reason: any, host: string)
 {
     console.error('Error connecting to SSH!');
@@ -90,9 +101,16 @@ function sshConnectionFail(reason: any, host: string)
     vscode.window.showErrorMessage('Error Connecting to SSH Host: "' + host + '"');
 }
 
-function sshConnect(ssh: any, settings: SSHSettings): Promise<void>
+/**
+ * A helper method for connecting the a {@link node_ssh} instance using
+ *  this plugin's settings type.  Note that this does no validation
+ *  of either parameter.
+ * @param sshInstance The {@link node_ssh} instance
+ * @param settings The plugin settings instance
+ */
+function sshConnect(sshInstance: any, settings: SSHSettings): Promise<void>
 {
-    return ssh.connect({
+    return sshInstance.connect({
         host: settings.host,
         username: settings.username,
         privateKey: settings.privateKey,
@@ -100,6 +118,13 @@ function sshConnect(ssh: any, settings: SSHSettings): Promise<void>
     });
 }
 
+/**
+ * Recursively finds the contents of an SSH directory and calls the provided
+ *  method on each found file in parallel.
+ * @param sshInstance The {@link node_ssh} instance
+ * @param remotePath The remote directory to iterate through
+ * @param callback the method to call on each file
+ */
 function iterateSSHDirContents(sshInstance: any, remotePath: string, callback: (entry: string) => void): void
 {
     sshInstance.exec("find", [remotePath, '-type', 'f']).then(
@@ -113,6 +138,13 @@ function iterateSSHDirContents(sshInstance: any, remotePath: string, callback: (
         console.error(reason);
     });
 }
+
+/**
+ * Downloads a single file from the remote to the local.
+ * @param sshInstance The {@link node_ssh} instance
+ * @param localFile The path of the local file to download to
+ * @param remoteFile The path of the source file in the remote
+ */
 function pullSSHFile(sshInstance: any, localFile: string, remoteFile: string): void
 {
     console.log('Downloading: "' + remoteFile + '" to "' + localFile + '"');
@@ -124,6 +156,14 @@ function pullSSHFile(sshInstance: any, localFile: string, remoteFile: string): v
             console.error(reason);
         });
 }
+
+/**
+ * Downlods all provided files/directories in parallel from the ssh server
+ * @param sshInstance The {@link node_ssh} instance
+ * @param localRoot The base path for local files
+ * @param remoteRoot The base path for remote files
+ * @param files The list of files/directories to upload
+ */
 function pullSSHFiles(sshInstance: any, localRoot: string, remoteRoot: string, files: string[]): void
 {
     files.forEach((value, index, array) =>{
@@ -143,6 +183,12 @@ function pullSSHFiles(sshInstance: any, localRoot: string, remoteRoot: string, f
     });
 }
 
+/**
+ * Uploads a single file from the local to the remote
+ * @param sshInstance The {@link node_ssh} instance
+ * @param localFile The path of the local file to upload
+ * @param remoteFile The path of the destination file in the remote
+ */
 function pushSSHFile(sshInstance: any, localFile: string, remoteFile: string): void
 {
     console.log('Uploading: "' + localFile + '" to "' + remoteFile + '"');
@@ -154,6 +200,14 @@ function pushSSHFile(sshInstance: any, localFile: string, remoteFile: string): v
             console.error(reason);
         });
 }
+
+/**
+ * Uploads all provided files/directories in parallel to the ssh server
+ * @param sshInstance The {@link node_ssh} instance
+ * @param localRoot The base path for local files
+ * @param remoteRoot The base path for remote files
+ * @param files The list of files/directories to download
+ */
 function pushSSHFiles(sshInstance: any, localRoot: string, remoteRoot: string, files: string[]): void
 {
     files.forEach((value, index, array) =>{
@@ -181,6 +235,11 @@ function pushSSHFiles(sshInstance: any, localRoot: string, remoteRoot: string, f
     });
 }
 
+/**
+ * Saves the given settings to the given file path (json)
+ * @param filePath The path to save the file to
+ * @param settings The settings to save
+ */
 function saveSSHSettings(filePath: string, settings: SSHSettings): void
 {
     // Save the file
@@ -188,25 +247,25 @@ function saveSSHSettings(filePath: string, settings: SSHSettings): void
     {
         if(err !== null)
         {
-            console.log('Error writing to ".sshsettings": ' + err);
+            console.error('Error writing to ".sshsettings": ' + err);
             vscode.window.showErrorMessage('Error writing to ".sshsettings"');
         }
     });
 }
 
-// this method is called when your extension is activated
-// your extension is activated the very first time the command is executed
-export function activate(context: vscode.ExtensionContext) {
-
-    // The command has been defined in the package.json file
-    // Now provide the implementation of the command with  registerCommand
-    // The commandId parameter must match the command field in package.json
+/**
+ * This method is called when the plugin is activated.
+ */
+export function activate(context: vscode.ExtensionContext) 
+{
+    // The command for initializing the extension and validating the extension file
     let loadSSHDisposable = vscode.commands.registerCommand('extension.loadSSH', () => {
         loadSettingsFile();
 
         vscode.window.showInformationMessage('Loaded SSH Extension');
     });
 
+    // The command for pushing all files to the remote
     let pushSSHDisposable = vscode.commands.registerCommand('extension.pushSSH', () => {
         
         loadSettingsFile().then((config) => {
@@ -222,6 +281,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
+    // The command fo rpulling all files from the remote
     let pullSSHDisposable = vscode.commands.registerCommand('extension.pullSSH', () => {
         
         loadSettingsFile().then((config) => {
@@ -237,6 +297,7 @@ export function activate(context: vscode.ExtensionContext) {
         });
     });
 
+    // When the user saves the document, we want to upload it
     vscode.workspace.onDidSaveTextDocument((event) =>
     {
         loadSettingsFile().then((config) => {
@@ -270,6 +331,8 @@ export function activate(context: vscode.ExtensionContext) {
     context.subscriptions.push(pullSSHDisposable);
 }
 
-// this method is called when your extension is deactivated
+/** 
+ * This method is called when the extension is deactivated.
+ */
 export function deactivate() {
 }
